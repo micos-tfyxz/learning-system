@@ -58,16 +58,6 @@ For all content types (text, tables, and images):
 
 ---
 
-### 6. Output Generation
-- **Interactive Reports**:
-  - Include source references (e.g., page numbers).
-  - Multi-modal content display (text, images, and tables).
-  - Allows users to explore query results interactively.
-- **Query History Tracking**:
-  - Tracks and maintains a history of user-generated reports for easy access.
-
----
-
 ## Key Features
 - **Multi-Modal Content Processing**: Handles text, images, and tables seamlessly.
 - **AI-Powered Descriptions**: Summarizes and contextualizes content using GPT-4.
@@ -108,11 +98,33 @@ For all content types (text, tables, and images):
 
 ---
 
-## example
-1. Analyze the PDF using main.py and check if the results are stored in MongoDB,
+## Example Usage
+
+### Step 1: Analyze PDF with `main.py`
+Run the `main.py` script to process the PDF and store the results in MongoDB:
+
 ![image](https://github.com/user-attachments/assets/8d65ffc8-2a7a-4272-b575-22ae9ef2a967)
 
-2.open the frontend demo.py to ask questions related to the PDF, and it will generate answers and provide some relevant questions for selection
+---
+
+### Step 2: Query with Frontend `frontend demo.py`
+Open the Streamlit interface and ask questions about the PDF:
+
+![屏幕截图 2025-04-22 205955](https://github.com/user-attachments/assets/fbedf14d-532f-43bc-a85f-102fbc06471a)
+
+---
+
+### Step 3: View Responses and click to explore Related Questions
+The system generates answers and suggests related questions for further exploration:
+
+![屏幕截图 2025-04-22 210015](https://github.com/user-attachments/assets/eeb0f4c1-48f3-4a0b-be45-3dd311ba7062)
+
+---
+
+### Step 4: Dive Deeper
+View another detailed answer:
+
+![屏幕截图 2025-04-22 210057](https://github.com/user-attachments/assets/38d16ee1-e273-4fb6-ba9a-52c55dfb8b11)
 
 ---
 
