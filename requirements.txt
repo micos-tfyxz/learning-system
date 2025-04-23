@@ -1,0 +1,17 @@
+pymupdf
+pdfplumbe
+pypdf2
+openai
+numpy
+scipy 
+pymongo
+dnspython
+pdf2image
+pillow
+pydantic
+typing-extensions
+streamlit
+python-dotenv
+tqdm
+tenacity
+python-multipart
