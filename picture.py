@@ -92,104 +92,131 @@ def extract_figure_captions(pdf_path):
     return captions_by_page
 
 def match_captions_to_images(pdf_path, image_positions, captions_by_page):
-    """Match captions to images based on positional relationships."""
+    """Match captions to images based on positional relationships, including cross-page matches."""
     matches = []
     
     with pdfplumber.open(pdf_path) as pdf:
+        total_pages = len(pdf.pages)
+        
         for page_num, page in enumerate(pdf.pages, start=1):
             images = image_positions.get(page_num, [])
-            captions = captions_by_page.get(page_num, [])
+            current_page_captions = captions_by_page.get(page_num, [])
+            next_page_captions = captions_by_page.get(page_num + 1, []) if page_num < total_pages else []
             
-            print(f"\nMatching page {page_num}: {len(images)} images, {len(captions)} captions")
+            print(f"\nMatching page {page_num}: {len(images)} images, {len(current_page_captions)} captions (current), {len(next_page_captions)} captions (next)")
             
-            if not captions or not images:
+            if not images:
                 continue
 
-            # Try to extract caption positions
-            try:
-                text_page = page.extract_words()
-                caption_positions = []
+            # Try to extract caption positions for current page
+            text_page = page.extract_words()
+            caption_positions = []
+            
+            # Process current page captions first
+            for caption in current_page_captions:
+                # Find first few words from the caption in the extracted text
+                caption_start = ' '.join(caption.split()[:3]).lower()
                 
-                for caption in captions:
-                    # Find first few words from the caption in the extracted text
+                # Find where this caption starts in the page
+                caption_y = None
+                for word in text_page:
+                    if caption_start.startswith(word['text'].lower()) or word['text'].lower() in caption_start:
+                        # Convert to bottom-origin coordinate system like images
+                        caption_y = page.height - word['bottom']
+                        break
+                
+                if caption_y is not None:
+                    caption_positions.append((caption, caption_y, 'current'))
+                    print(f"  Current page caption '{caption[:30]}...' at position y={caption_y:.1f}")
+            
+            # If no captions on current page, check next page's captions
+            if not caption_positions and next_page_captions:
+                next_page = pdf.pages[page_num]  # page_num is 1-based, index is 0-based
+                next_text_page = next_page.extract_words()
+                
+                for caption in next_page_captions:
                     caption_start = ' '.join(caption.split()[:3]).lower()
-                    
-                    # Find where this caption starts in the page
                     caption_y = None
-                    for word in text_page:
+                    
+                    for word in next_text_page:
                         if caption_start.startswith(word['text'].lower()) or word['text'].lower() in caption_start:
-                            # Convert to bottom-origin coordinate system like images
-                            caption_y = page.height - word['bottom']
+                            # For next page captions, we want the top-most position
+                            caption_y = next_page.height - word['bottom']
                             break
                     
                     if caption_y is not None:
-                        caption_positions.append((caption, caption_y))
-                        print(f"  Caption '{caption[:30]}...' at position y={caption_y:.1f}")
-                
-                # Sort images and captions by y-position
-                images_sorted = sorted(images, key=lambda img: img["y0"])
-                
-                # If we have caption positions, match them to nearest images
-                if caption_positions:
-                    for caption, cap_y in caption_positions:
-                        # Find closest image ABOVE the caption (captions usually appear below images)
-                        best_img = None
-                        best_dist = float('inf')
-                        
-                        for img in images_sorted:
-                            # Get center of image
-                            img_center_y = (img["y0"] + img["y1"]) / 2
-                            
-                            # Caption is usually below image, so img_center_y should be greater than cap_y
-                            if img_center_y > cap_y:
-                                dist = img_center_y - cap_y
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    best_img = img
-                        
-                        # If no image found above, find closest image
-                        if best_img is None:
-                            for img in images_sorted:
-                                dist = abs((img["y0"] + img["y1"]) / 2 - cap_y)
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    best_img = img
-                        
-                        if best_img:
-                            matches.append({"page": page_num, "caption": caption, "matched_image": best_img})
-                            print(f"  Matched caption to image with y-pos: {best_img['y0']:.1f}-{best_img['y1']:.1f}")
-                else:
-                    # Fallback to original logic
-                    print("  No caption positions found, using fallback matching")
-                    if len(captions) == 1:
-                        # Just one caption - use the most central image
-                        page_center = (page.width / 2, page.height / 2)
-                        dists = [np.hypot(((img["x0"] + img["x1"]) / 2) - page_center[0], 
-                                        ((img["y0"] + img["y1"]) / 2) - page_center[1]) for img in images_sorted]
-                        best_idx = int(np.argmin(dists)) if dists else 0
-                        best_image = images_sorted[best_idx]
-                        matches.append({"page": page_num, "caption": captions[0], "matched_image": best_image})
-                        print(f"  Matched single caption to central image at y0={best_image['y0']}")
-                    else:
-                        # Equal counts - match in position order
-                        if len(images_sorted) == len(captions):
-                            for cap, img in zip(captions, images_sorted):
-                                matches.append({"page": page_num, "caption": cap, "matched_image": img})
-                                print(f"  Matched caption '{cap[:20]}...' to image at y0={img['y0']}")
-                        else:
-                            print(f"  Warning: Uneven count - {len(images_sorted)} images vs {len(captions)} captions")
-                            # Assign captions to images based on position in document
-                            for i, cap in enumerate(captions):
-                                if i < len(images_sorted):
-                                    matches.append({"page": page_num, "caption": cap, "matched_image": images_sorted[i]})
-                                    print(f"  Matched caption '{cap[:20]}...' to image at y0={images_sorted[i]['y0']}")
+                        # For next page captions, we consider them as being at the "top" of their page
+                        # so we add them with a special flag
+                        caption_positions.append((caption, caption_y, 'next'))
+                        print(f"  Next page caption '{caption[:30]}...' at position y={caption_y:.1f}")
             
-            except Exception as e:
-                print(f"Error in caption matching for page {page_num}: {str(e)}")
-                # Very simple fallback if everything fails
-                for i, cap in enumerate(captions):
-                    if i < len(images):
-                        matches.append({"page": page_num, "caption": cap, "matched_image": images[i]})
+            # Sort images by y-position (from top to bottom of page)
+            images_sorted = sorted(images, key=lambda img: img["y0"], reverse=True)
+            
+            # If we have caption positions, match them to nearest images
+            if caption_positions:
+                # Separate current and next page captions
+                current_captions = [(cap, y) for cap, y, source in caption_positions if source == 'current']
+                next_captions = [(cap, y) for cap, y, source in caption_positions if source == 'next']
+                
+                # Match current page captions first
+                for caption, cap_y in current_captions:
+                    # Find closest image ABOVE the caption (captions usually appear below images)
+                    best_img = None
+                    best_dist = float('inf')
+                    
+                    for img in images_sorted:
+                        img_center_y = (img["y0"] + img["y1"]) / 2
+                        
+                        if img_center_y > cap_y:  # Image is above caption
+                            dist = img_center_y - cap_y
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_img = img
+                    
+                    # If no image found above, find closest image
+                    if best_img is None:
+                        for img in images_sorted:
+                            dist = abs((img["y0"] + img["y1"]) / 2 - cap_y)
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_img = img
+                    
+                    if best_img:
+                        matches.append({"page": page_num, "caption": caption, "matched_image": best_img})
+                        print(f"  Matched current page caption to image with y-pos: {best_img['y0']:.1f}-{best_img['y1']:.1f}")
+                
+                # Match next page captions to the bottom-most images on current page
+                for caption, cap_y in next_captions:
+                    # For next page captions, we assume they belong to the bottom-most images on current page
+                    if images_sorted:
+                        # Get the bottom-most image (last in sorted list)
+                        best_img = images_sorted[-1]
+                        matches.append({"page": page_num, "caption": caption, "matched_image": best_img})
+                        print(f"  Matched next page caption to bottom image with y-pos: {best_img['y0']:.1f}-{best_img['y1']:.1f}")
+            
+            else:
+                # Fallback to original logic if no captions found
+                print("  No caption positions found, using fallback matching")
+                if len(current_page_captions) == 1:
+                    page_center = (page.width / 2, page.height / 2)
+                    dists = [np.hypot(((img["x0"] + img["x1"]) / 2) - page_center[0], 
+                            ((img["y0"] + img["y1"]) / 2) - page_center[1]) for img in images_sorted]
+                    best_idx = int(np.argmin(dists)) if dists else 0
+                    best_image = images_sorted[best_idx]
+                    matches.append({"page": page_num, "caption": current_page_captions[0], "matched_image": best_image})
+                    print(f"  Matched single caption to central image at y0={best_image['y0']}")
+                elif current_page_captions:
+                    if len(images_sorted) == len(current_page_captions):
+                        for cap, img in zip(current_page_captions, images_sorted):
+                            matches.append({"page": page_num, "caption": cap, "matched_image": img})
+                            print(f"  Matched caption '{cap[:20]}...' to image at y0={img['y0']}")
+                    else:
+                        print(f"  Warning: Uneven count - {len(images_sorted)} images vs {len(current_page_captions)} captions")
+                        for i, cap in enumerate(current_page_captions):
+                            if i < len(images_sorted):
+                                matches.append({"page": page_num, "caption": cap, "matched_image": images_sorted[i]})
+                                print(f"  Matched caption '{cap[:20]}...' to image at y0={images_sorted[i]['y0']}")
     
     return matches
 
@@ -198,10 +225,10 @@ def match_captions_to_images(pdf_path, image_positions, captions_by_page):
 # ==========================
 
 def extract_image_data(pdf_path, match, margin=50):
-    """Extract image data using PyMuPDF first, then fallback to pdf2image"""
+    """Extract image data using PyMuPDF first, then fallback to pdf2image, with careful handling to exclude captions"""
     print(f"\nExtracting image for page {match['page']}, caption: {match['caption'][:50]}...")
     
-    # Method 1: Try PyMuPDF first (more precise)
+    # Method 1: Try PyMuPDF first (most precise for native PDF images)
     try:
         doc = fitz.open(pdf_path)
         page = doc.load_page(match["page"] - 1)
@@ -209,73 +236,62 @@ def extract_image_data(pdf_path, match, margin=50):
         # Get target coordinates from the match
         target_x0 = match["matched_image"]["x0"]
         target_y0 = match["matched_image"]["y0"]
-        target_x1 = match["matched_image"]["x1"]
         target_y1 = match["matched_image"]["y1"]
+        target_x1 = match["matched_image"]["x1"]
         
-        # Print debugging info
-        print(f"Target coordinates (pdfplumber): x0={target_x0:.2f}, y0={target_y0:.2f}, x1={target_x1:.2f}, y1={target_y1:.2f}")
-        
-        # Important: Convert from pdfplumber coordinate system to PyMuPDF
-        # In pdfplumber, y0 is distance from bottom
-        # In PyMuPDF, y0 is distance from top
+        # Convert coordinates to PyMuPDF system (y-origin at top)
         page_height = page.rect.height
-        pymupdf_y0 = page_height - target_y1  # Flip coordinates
+        pymupdf_y0 = page_height - target_y1
         pymupdf_y1 = page_height - target_y0
         
-        # Apply margin
-        pymupdf_x0 = max(0, target_x0 - margin)
-        pymupdf_x1 = min(page.rect.width, target_x1 + margin)
-        pymupdf_y0 = max(0, pymupdf_y0 - margin)
-        pymupdf_y1 = min(page_height, pymupdf_y1 + margin)
+        # Create a tight rectangle around the image (no margin initially)
+        tight_rect = fitz.Rect(target_x0, pymupdf_y0, target_x1, pymupdf_y1)
         
-        # Create a rectangle to search for images
-        search_rect = fitz.Rect(pymupdf_x0, pymupdf_y0, pymupdf_x1, pymupdf_y1)
-        print(f"Converted PyMuPDF search rectangle: {search_rect}")
+        # Strategy 1: Try to extract the native image object
+        for img in page.get_images(full=True):
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            if base_image and base_image.get("image"):
+                # Check if this image overlaps with our target area
+                img_info = next((i for i in page.get_image_info() if i['xref'] == xref), None)
+                if img_info:
+                    img_rect = fitz.Rect(img_info['bbox'])
+                    if tight_rect.intersects(img_rect):
+                        print("Extracted native PDF image object")
+                        doc.close()
+                        return base64.b64encode(base_image["image"]).decode("utf-8")
         
-        # Try direct area extraction first (more reliable)
+        # Strategy 2: If native extraction failed, try direct area cropping
+        # First attempt: tight crop (no margin)
         try:
-            pix = page.get_pixmap(clip=search_rect, dpi=300)
+            pix = page.get_pixmap(clip=tight_rect, dpi=300)
             img_data = pix.tobytes("png")
             doc.close()
-            print("Successfully extracted image area using PyMuPDF")
+            print("Extracted tight crop of image area")
             return base64.b64encode(img_data).decode("utf-8")
         except Exception as e:
-            print(f"Direct area extraction failed: {str(e)}")
+            print(f"Tight crop failed: {str(e)}")
             
-            # Fallback to image objects if direct extraction fails
-            found_image = False
-            for img in page.get_images(full=True):
-                xref = img[0]
-                try:
-                    # Get the image rectangle
-                    for img_info in page.get_image_info():
-                        if img_info.get('xref') == xref:
-                            img_rect = fitz.Rect(img_info['bbox'])
-                            
-                            # Check overlap
-                            if search_rect.intersects(img_rect):
-                                print(f"Found matching image with rect: {img_rect}")
-                                base_image = doc.extract_image(xref)
-                                if base_image and base_image.get("image"):
-                                    found_image = True
-                                    doc.close()
-                                    print("Successfully extracted image using PyMuPDF")
-                                    return base64.b64encode(base_image["image"]).decode("utf-8")
-                except Exception as e:
-                    print(f"Error processing image xref {xref}: {str(e)}")
-                    continue
-            
-            if not found_image:
+            # Second attempt: small margin if tight crop fails
+            margin_rect = tight_rect + (-5, -5, 5, 5)  # Small 5-point margin
+            try:
+                pix = page.get_pixmap(clip=margin_rect, dpi=300)
+                img_data = pix.tobytes("png")
                 doc.close()
-                
+                print("Extracted image with small margin")
+                return base64.b64encode(img_data).decode("utf-8")
+            except Exception as e:
+                print(f"Small margin crop also failed: {str(e)}")
+        
+        doc.close()
     except Exception as e:
         print(f"PyMuPDF extraction failed: {str(e)}")
         if 'doc' in locals() and doc:
             doc.close()
     
-    # Method 2: Fallback to pdf2image with fixed coordinate handling
+    # Method 2: Fallback to pdf2image only when absolutely necessary
     try:
-        print("Falling back to pdf2image method")
+        print("Falling back to pdf2image with tight cropping")
         images = convert_from_path(pdf_path, first_page=match["page"], last_page=match["page"], dpi=300)
         if not images:
             return None
@@ -292,25 +308,18 @@ def extract_image_data(pdf_path, match, margin=50):
                 pdf_width = page_img.width
                 pdf_height = page_img.height
         
-        # Calculate scale factor between PDF points and image pixels
+        # Calculate scale factors
         scale_x = page_img.width / pdf_width
         scale_y = page_img.height / pdf_height
         
-        # DEBUG: print scaling info
-        print(f"PDF dimensions: {pdf_width}x{pdf_height}")
-        print(f"Image dimensions: {page_img.width}x{page_img.height}")
-        print(f"Scale factors: {scale_x:.2f}x, {scale_y:.2f}y")
+        # Convert coordinates with tight cropping (no margin)
+        x0 = int(match["matched_image"]["x0"] * scale_x)
+        y0 = int((pdf_height - match["matched_image"]["y1"]) * scale_y)
+        x1 = int(match["matched_image"]["x1"] * scale_x)
+        y1 = int((pdf_height - match["matched_image"]["y0"]) * scale_y)
         
-        # Convert from pdfplumber (bottom-left origin) to image coordinates (top-left origin)
-        # with proper scaling
-        x0 = max(0, int(match["matched_image"]["x0"] * scale_x - margin))
-        # For Y, convert from bottom-origin to top-origin
-        y0 = max(0, int((pdf_height - match["matched_image"]["y1"]) * scale_y - margin))
-        x1 = min(page_img.width, int(match["matched_image"]["x1"] * scale_x + margin))
-        y1 = min(page_img.height, int((pdf_height - match["matched_image"]["y0"]) * scale_y + margin))
+        print(f"Cropping image at tight coordinates: ({x0}, {y0}, {x1}, {y1})")
         
-        print(f"Cropping image at coordinates: ({x0}, {y0}, {x1}, {y1})")
-
         if x0 >= x1 or y0 >= y1:
             print("Invalid cropping coordinates")
             return None
@@ -328,35 +337,108 @@ def extract_image_data(pdf_path, match, margin=50):
 # 3. Generate Image Descriptions
 # ==========================
 
-def generate_image_description(match, pdf_path, openai_client, margin=50):
-    """Generate an image description using OpenAI."""
-    with pdfplumber.open(pdf_path) as pdf:
-        page = pdf.pages[match["page"] - 1]
-        context_text = page.extract_text() or ""
+def generate_image_description(match, pdf_path, openai_client):
+    """Generate an image description using OpenAI's vision capabilities combined with the caption."""
+    # First extract the image data
+    image_data = match.get("image_data")
+    if not image_data:
+        return "No image data available for description"
     
-    prompt = (f"Please generate a concise description (within 50 words) for the image based on the following caption and context. "
-              f"Caption: {match['caption']}\nContext: {context_text}\nDescription:")
+    # Prepare the image content for GPT-4 Vision
+    image_url = f"data:image/png;base64,{image_data}"
+    
+    # Get the caption text
+    caption = match.get("caption", "No caption available")
+    
+    # Prepare the messages for GPT-4 Vision
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "You are an expert at analyzing technical figures from academic papers. "
+                        "Please generate a concise yet comprehensive description of this image "
+                        "by combining visual analysis with the provided caption. "
+                        "Focus on:\n"
+                        "1. The main visual elements and their relationships\n"
+                        "2. Key patterns or trends shown\n"
+                        "3. How the visual elements relate to the caption\n"
+                        "4. Any important details that stand out\n\n"
+                        f"Caption: {caption}\n\n"
+                        "Description:"
+                    )
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_url,
+                        "detail": "high"  # Use 'high' for detailed analysis
+                    }
+                }
+            ]
+        }
+    ]
+    
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=100
+            model="gpt-4o",
+            messages=messages,
+            max_tokens=300,
+            temperature=0.2  # Lower temperature for more factual descriptions
         )
         description = response.choices[0].message.content.strip()
+        
+        # Post-process the description to ensure quality
+        description = description.replace("The image shows", "").strip()
+        description = description.replace("This image depicts", "").strip()
+        if not description.endswith("."):
+            description += "."
+            
+        return description
     except Exception as e:
-        description = f"Fallback Description: Caption: {match['caption']}. Context: {context_text}. Error: {str(e)}"
-    return description
+        print(f"Error generating image description: {str(e)}")
+        # Fallback description using just the caption
+        return f"Technical figure showing: {caption}"
 
-# ==========================
-# 4. Main Workflow (Improved)
-# ==========================
 
+def save_images_for_verification(matches, output_dir="extracted_images"):
+    """Save extracted images as PNG files for visual verification."""
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    for i, match in enumerate(matches):
+        if not match.get("image_data"):
+            continue
+            
+        try:
+            # Decode base64 image data
+            img_data = base64.b64decode(match["image_data"])
+            img = Image.open(io.BytesIO(img_data))
+            
+            # Generate filename with page number and caption snippet
+            caption_snippet = match["caption"][:30].replace(" ", "_").replace(".", "").replace(":", "")
+            filename = f"page_{match['page']}_{i}_{caption_snippet}.png"
+            filepath = os.path.join(output_dir, filename)
+            
+            # Save image
+            img.save(filepath)
+            print(f"Saved verification image: {filepath}")
+            
+            # Also add the filepath to the match dictionary
+            match["image_filepath"] = filepath
+            
+        except Exception as e:
+            print(f"Error saving image for match {i}: {str(e)}")
+
+# Modify the main workflow to include image saving
 if __name__ == "__main__":
     # Configuration
-    pdf_path = ""
+    pdf_path = "D:/作业/research/learning system/2409.13997v1.pdf"
     openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     output_file = "matched_captions_images_description.json"
+    image_output_dir = "extracted_images_verification"  # New directory for verification images
 
     # Step 1: Extract and match
     print("=== Extracting image positions ===")
@@ -386,9 +468,10 @@ if __name__ == "__main__":
                 match["matched_image"]["y1"]
             ]
 
+    # Save images for verification
+    print("\n=== Saving images for verification ===")
+    save_images_for_verification(matches, image_output_dir)
+
     # Save results
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump({"matches": matches}, f, ensure_ascii=False, indent=2)
-
-    print(f"\nProcessing completed. Results saved to {output_file}")
-    print(f"Total matches processed: {len(matches)}")
