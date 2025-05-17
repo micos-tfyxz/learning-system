@@ -160,9 +160,6 @@ class EnhancedQueryService:
         return np.array(self.vectorizer.batch_vectorize([content])[0].vector)
     
     def _extract_slide_explanation_only(self, ppt_path: str, slide_num: str) -> str:
-        """
-        提取幻灯片的解释内容，不包括图像、注释等
-        """
         with open(ppt_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
@@ -192,29 +189,25 @@ class EnhancedQueryService:
             query_text: str,
             ppt_path: str = "presentation.md"
         ):
-        """
-        重构版：根据用户对幻灯片的追问，结合原 Markdown 内容生成子图解释
-        """
 
-        # Step 1: 向量化跟进问题
+
         query_vector = self._vectorize_query(followup_question)
 
-        # Step 2: 搜索最相似的新图像（用于支持追问解释）
         image_candidates = self._vector_search(query_vector)
         image_candidates = sorted(image_candidates, key=lambda x: x["similarity"], reverse=True)
         best = image_candidates[0]
         best_image_data = best["original"]
         best_image_desc = best["description"]
 
-        # Step 3: 提取父幻灯片的完整 Markdown 内容
+
         parent_explanation_text = self._extract_slide_explanation_only(ppt_path, slide_num)
 
 
-        # Step 4: 获取相关文本上下文
+
         related_texts = self._search_text_by_question(followup_question)
         context_text = "\n\n".join([doc['original'] for doc in related_texts])[:1000]
 
-        # Step 5: 构造 GPT 提示语
+
         prompt = (
             f"The user asked a follow-up question about this slide explanation:\n"
             f"{parent_explanation_text}\n\n"
@@ -226,7 +219,7 @@ class EnhancedQueryService:
         )
 
 
-        # Step 6: GPT 生成解释
+
         response = self.ppt_gen.openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
@@ -236,11 +229,10 @@ class EnhancedQueryService:
         raw_text = response.choices[0].message.content.strip()
         explanations = [line.strip() for line in raw_text.split('\n') if line.strip().startswith(tuple("1234567890"))][:2]
 
-        # Step 7: 插入 Markdown 文件
         with open(ppt_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
-        # 找到父幻灯片插入位置
+
         insert_index = None
         slide_header = f"<!-- PPT Slide {slide_num} -->"
         end_marker = "---"
@@ -275,7 +267,7 @@ class EnhancedQueryService:
             )
             child_slides.append(child_md)
 
-        # 插入新内容
+
         lines[insert_index:insert_index] = ["\n"] + child_slides + ["\n"]
 
         with open(ppt_path, "w", encoding="utf-8") as f:
