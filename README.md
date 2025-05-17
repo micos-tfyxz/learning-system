@@ -110,21 +110,21 @@ Run the `main.py` script to process the PDF and store the results in MongoDB:
 ### Step 2: Query with Frontend `frontend demo.py`
 Open the Streamlit interface and ask questions about the PDF:
 
-![屏幕截图 2025-04-22 205955](https://github.com/user-attachments/assets/fbedf14d-532f-43bc-a85f-102fbc06471a)
+![image](https://github.com/user-attachments/assets/8655e1ae-518b-41f5-b5ce-8756d5fa516d)
 
 ---
 
-### Step 3: View Responses and click to explore Related Questions
-The system generates answers and suggests related questions for further exploration:
+### Step 3: View Responses and ask follow-up Related Questions
+The system generates answers and displays them in PPT style:
 
-![屏幕截图 2025-04-22 210015](https://github.com/user-attachments/assets/eeb0f4c1-48f3-4a0b-be45-3dd311ba7062)
+![image](https://github.com/user-attachments/assets/92fa724a-261f-4ff2-a344-1fe1274316b7)
 
 ---
 
-### Step 4: Dive Deeper
+### Step 4 Multiple rounds of questioning: 
 View another detailed answer:
 
-![屏幕截图 2025-04-22 210057](https://github.com/user-attachments/assets/38d16ee1-e273-4fb6-ba9a-52c55dfb8b11)
+![屏幕截图 2025-05-15 223126](https://github.com/user-attachments/assets/ca59b45c-7e5f-4749-8311-d837027f8db9)
 
 ---
 
