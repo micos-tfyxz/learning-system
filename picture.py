@@ -9,7 +9,7 @@ import base64
 from pdf2image import convert_from_path
 from PIL import Image
 import io
-import fitz  # PyMuPDF
+import fitz 
 
 # ==========================
 # 1. Image and Caption Extraction and Matching (Improved)
