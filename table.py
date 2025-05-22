@@ -156,7 +156,7 @@ def generate_table_description(match, pdf_path, openai_client, margin=50):
               f"Caption: {match['caption']}\nContext: {context_text}\nDescription:")
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=100
