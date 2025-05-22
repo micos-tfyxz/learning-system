@@ -9,16 +9,15 @@ import base64
 from pdf2image import convert_from_path
 from PIL import Image
 import io
-import fitz 
+import fitz  
 
 # ==========================
-# 1. Image and Caption Extraction and Matching (Improved)
+# 1. Image and Caption Extraction and Matching 
 # ==========================
 
 def extract_images_positions(pdf_path):
     """Extract image positions from PDF using pdfplumber."""
     image_positions = {}
-    print("\nDebugging image extraction:")
     
     # Open PyMuPDF document once
     doc = None
@@ -92,133 +91,109 @@ def extract_figure_captions(pdf_path):
     return captions_by_page
 
 def match_captions_to_images(pdf_path, image_positions, captions_by_page):
-    """Match captions to images based on positional relationships, including cross-page matches."""
+    """Match captions to images with font check (bold) and closest distance rule, ensuring each image is used once."""
     matches = []
-    
+    used_images = set()
+
     with pdfplumber.open(pdf_path) as pdf:
         total_pages = len(pdf.pages)
-        
         for page_num, page in enumerate(pdf.pages, start=1):
             images = image_positions.get(page_num, [])
-            current_page_captions = captions_by_page.get(page_num, [])
-            next_page_captions = captions_by_page.get(page_num + 1, []) if page_num < total_pages else []
-            
-            print(f"\nMatching page {page_num}: {len(images)} images, {len(current_page_captions)} captions (current), {len(next_page_captions)} captions (next)")
-            
             if not images:
                 continue
 
-            # Try to extract caption positions for current page
-            text_page = page.extract_words()
-            caption_positions = []
-            
-            # Process current page captions first
-            for caption in current_page_captions:
-                # Find first few words from the caption in the extracted text
-                caption_start = ' '.join(caption.split()[:3]).lower()
-                
-                # Find where this caption starts in the page
-                caption_y = None
-                for word in text_page:
-                    if caption_start.startswith(word['text'].lower()) or word['text'].lower() in caption_start:
-                        # Convert to bottom-origin coordinate system like images
-                        caption_y = page.height - word['bottom']
+            text_words = page.extract_words(extra_attrs=["fontname", "size"])
+            captions = captions_by_page.get(page_num, [])
+            next_captions = captions_by_page.get(page_num + 1, []) if page_num < total_pages else []
+
+            print(f"\nPage {page_num}: {len(images)} images, {len(captions)} captions")
+
+            image_candidates = [
+                {"img": img, "used": False} for img in sorted(images, key=lambda i: i["y0"], reverse=True)
+            ]
+
+            caption_infos = []
+
+            # Analyze each caption's position and font
+            for cap in captions:
+                cap_words = cap.split()
+                prefix = " ".join(cap_words[:3]).lower()
+                found_y = None
+                is_bold = False
+
+                for word in text_words:
+                    if word["text"].lower() in prefix:
+                        found_y = page.height - word["bottom"]
+                        # Check if font is bold (heuristic)
+                        if "Bold" in word["fontname"] or word["fontname"].endswith("Bd"):
+                            is_bold = True
                         break
-                
-                if caption_y is not None:
-                    caption_positions.append((caption, caption_y, 'current'))
-                    print(f"  Current page caption '{caption[:30]}...' at position y={caption_y:.1f}")
-            
-            # If no captions on current page, check next page's captions
-            if not caption_positions and next_page_captions:
-                next_page = pdf.pages[page_num]  # page_num is 1-based, index is 0-based
-                next_text_page = next_page.extract_words()
-                
-                for caption in next_page_captions:
-                    caption_start = ' '.join(caption.split()[:3]).lower()
-                    caption_y = None
-                    
-                    for word in next_text_page:
-                        if caption_start.startswith(word['text'].lower()) or word['text'].lower() in caption_start:
-                            # For next page captions, we want the top-most position
-                            caption_y = next_page.height - word['bottom']
+
+                if found_y:
+                    caption_infos.append({
+                        "text": cap,
+                        "y": found_y,
+                        "is_bold": is_bold,
+                        "source": "current"
+                    })
+
+            # Also check next page's top captions
+            if not caption_infos and next_captions:
+                next_text_words = pdf.pages[page_num].extract_words(extra_attrs=["fontname", "size"])
+                for cap in next_captions:
+                    cap_words = cap.split()
+                    prefix = " ".join(cap_words[:3]).lower()
+                    found_y = None
+                    is_bold = False
+                    for word in next_text_words:
+                        if word["text"].lower() in prefix:
+                            found_y = pdf.pages[page_num].height - word["bottom"]
+                            if "Bold" in word["fontname"] or word["fontname"].endswith("Bd"):
+                                is_bold = True
                             break
-                    
-                    if caption_y is not None:
-                        # For next page captions, we consider them as being at the "top" of their page
-                        # so we add them with a special flag
-                        caption_positions.append((caption, caption_y, 'next'))
-                        print(f"  Next page caption '{caption[:30]}...' at position y={caption_y:.1f}")
-            
-            # Sort images by y-position (from top to bottom of page)
-            images_sorted = sorted(images, key=lambda img: img["y0"], reverse=True)
-            
-            # If we have caption positions, match them to nearest images
-            if caption_positions:
-                # Separate current and next page captions
-                current_captions = [(cap, y) for cap, y, source in caption_positions if source == 'current']
-                next_captions = [(cap, y) for cap, y, source in caption_positions if source == 'next']
-                
-                # Match current page captions first
-                for caption, cap_y in current_captions:
-                    # Find closest image ABOVE the caption (captions usually appear below images)
-                    best_img = None
-                    best_dist = float('inf')
-                    
-                    for img in images_sorted:
-                        img_center_y = (img["y0"] + img["y1"]) / 2
-                        
-                        if img_center_y > cap_y:  # Image is above caption
-                            dist = img_center_y - cap_y
-                            if dist < best_dist:
-                                best_dist = dist
-                                best_img = img
-                    
-                    # If no image found above, find closest image
-                    if best_img is None:
-                        for img in images_sorted:
-                            dist = abs((img["y0"] + img["y1"]) / 2 - cap_y)
-                            if dist < best_dist:
-                                best_dist = dist
-                                best_img = img
-                    
-                    if best_img:
-                        matches.append({"page": page_num, "caption": caption, "matched_image": best_img})
-                        print(f"  Matched current page caption to image with y-pos: {best_img['y0']:.1f}-{best_img['y1']:.1f}")
-                
-                # Match next page captions to the bottom-most images on current page
-                for caption, cap_y in next_captions:
-                    # For next page captions, we assume they belong to the bottom-most images on current page
-                    if images_sorted:
-                        # Get the bottom-most image (last in sorted list)
-                        best_img = images_sorted[-1]
-                        matches.append({"page": page_num, "caption": caption, "matched_image": best_img})
-                        print(f"  Matched next page caption to bottom image with y-pos: {best_img['y0']:.1f}-{best_img['y1']:.1f}")
-            
-            else:
-                # Fallback to original logic if no captions found
-                print("  No caption positions found, using fallback matching")
-                if len(current_page_captions) == 1:
-                    page_center = (page.width / 2, page.height / 2)
-                    dists = [np.hypot(((img["x0"] + img["x1"]) / 2) - page_center[0], 
-                            ((img["y0"] + img["y1"]) / 2) - page_center[1]) for img in images_sorted]
-                    best_idx = int(np.argmin(dists)) if dists else 0
-                    best_image = images_sorted[best_idx]
-                    matches.append({"page": page_num, "caption": current_page_captions[0], "matched_image": best_image})
-                    print(f"  Matched single caption to central image at y0={best_image['y0']}")
-                elif current_page_captions:
-                    if len(images_sorted) == len(current_page_captions):
-                        for cap, img in zip(current_page_captions, images_sorted):
-                            matches.append({"page": page_num, "caption": cap, "matched_image": img})
-                            print(f"  Matched caption '{cap[:20]}...' to image at y0={img['y0']}")
-                    else:
-                        print(f"  Warning: Uneven count - {len(images_sorted)} images vs {len(current_page_captions)} captions")
-                        for i, cap in enumerate(current_page_captions):
-                            if i < len(images_sorted):
-                                matches.append({"page": page_num, "caption": cap, "matched_image": images_sorted[i]})
-                                print(f"  Matched caption '{cap[:20]}...' to image at y0={images_sorted[i]['y0']}")
-    
+                    if found_y:
+                        caption_infos.append({
+                            "text": cap,
+                            "y": found_y,
+                            "is_bold": is_bold,
+                            "source": "next"
+                        })
+
+            for cap_info in caption_infos:
+                caption_text = cap_info["text"]
+                caption_y = cap_info["y"]
+                is_bold = cap_info["is_bold"]
+
+                best_img = None
+                best_dist = float("inf")
+
+                for candidate in image_candidates:
+                    if candidate["used"]:
+                        continue
+                    img = candidate["img"]
+                    img_center_y = (img["y0"] + img["y1"]) / 2
+                    dist = abs(img_center_y - caption_y)
+
+                    # Prefer images above caption (standard layout)
+                    if img_center_y > caption_y:
+                        dist *= 0.9  # prioritize upper images slightly
+
+                    if dist < best_dist:
+                        best_img = candidate
+                        best_dist = dist
+
+                if best_img:
+                    best_img["used"] = True
+                    matches.append({
+                        "page": page_num,
+                        "caption": caption_text,
+                        "matched_image": best_img["img"],
+                        "is_bold_caption": is_bold
+                    })
+                    print(f"Matched caption '{caption_text[:30]}...' (bold={is_bold}) to image at y0={best_img['img']['y0']:.1f}")
+
     return matches
+
 
 # ==========================
 # 2. Improved Image Extraction Methods (Modified to match table.py logic)
@@ -374,7 +349,7 @@ def generate_image_description(match, pdf_path, openai_client):
                     "type": "image_url",
                     "image_url": {
                         "url": image_url,
-                        "detail": "high"  # Use 'high' for detailed analysis
+                        "detail": "high"  
                     }
                 }
             ]
@@ -435,7 +410,7 @@ def save_images_for_verification(matches, output_dir="extracted_images"):
 # Modify the main workflow to include image saving
 if __name__ == "__main__":
     # Configuration
-    pdf_path = "D:/作业/research/learning system/2409.13997v1.pdf"
+    pdf_path =""
     openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     output_file = "matched_captions_images_description.json"
     image_output_dir = "extracted_images_verification"  # New directory for verification images
