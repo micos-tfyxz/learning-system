@@ -97,9 +97,9 @@ class PDFProcessor:
             
         # Numbering format score
         if re.match(r'^(Chapter [IVXLCDM]+|(\d+\.)+\d+|Section\s\d+)', feature["text"]):
-            score += 0.5
+            score += 1.5
             
-        return score >= 2.5  # Adjusted threshold for accuracy
+        return score >= 3.5  # Adjusted threshold for accuracy
     
     def structure_content(self, pdf_path: str) -> List[Dict]:
         """Structure PDF content and include text positions"""
@@ -197,7 +197,7 @@ class ContentSummarizer:
                 continue
                 
             response = self.openai_client.chat.completions.create(
-                model="gpt-4-turbo",
+                model="gpt-4o",
                 messages=[{
                     "role": "user",
                     "content": f"Please summarize the following technical content (in English):\nTitle: {title}\nContent: {chunk}"
