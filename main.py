@@ -109,7 +109,7 @@ class PDFIntegrator:
         return unified
 
 if __name__ == "__main__":
-    pdf_path = ""
+    pdf_path = "D:/作业/research/learning system/2409.13997v1.pdf"
     
     # Step 1: Process all content
     integrator = PDFIntegrator(pdf_path)
