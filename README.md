@@ -1,4 +1,4 @@
-# Learning System: Document Analysis Assistant
+# Textbook Learning System: Document Analysis Assistant
 
 ## Overview
 
