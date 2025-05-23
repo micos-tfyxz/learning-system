@@ -18,8 +18,7 @@ The **Learning System** is a powerful document analysis assistant designed to pr
 - **Text**: 
   - Hierarchical parsing with heading detection based on font size, position, and styling (bold/italic).
 - **Tables**:
-  - Matches captions to table bounding boxes.
-  - Extracts positional metadata for tables.
+  - Matches captions to table and extract the table in image form.
 - **Images**:
   - Extracts coordinates and associates images with corresponding captions.
 
